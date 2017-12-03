@@ -1,0 +1,380 @@
+   [HttpGet]
+        public JsonResult GetCurrentMax(decimal school_id, decimal district_id, string school_nbr)
+        {
+            var currentMax = db.MaxEnrollmentAuthorized.Where(x => x.school_id == school_id && x.district_id == district_id && x.school_nbr == school_nbr && x.ActiveDate <= DateTime.Now).OrderBy(x => x.ActiveDate).ThenBy(x => x.ModifiedDate).Select(x => x.MaxAuthorized).ToList().Last() != null ? db.MaxEnrollmentAuthorized.Where(x => x.school_id == school_id && x.district_id == district_id && x.school_nbr == school_nbr && x.ActiveDate <= DateTime.Now).OrderBy(x => x.ActiveDate).ThenBy(x => x.ModifiedDate).Select(x => x.MaxAuthorized).ToList().Last() : 0;
+
+            return Json(currentMax, JsonRequestBehavior.AllowGet);
+        }
+		
+		
+        public ActionResult CreateEnrollmentHistogram()
+        {
+            var currentMax = 0;
+            var currentEnrollment = 0;
+            var school_id = Convert.ToDecimal(TempData["SelectedSchoolId"]);
+            var district_id = Convert.ToDecimal(TempData["SelectedDistrictId"]);
+            var school_nbr = (TempData["SelectedSchoolNbr"]).ToString();
+            if (school_nbr != null)
+            {
+                currentMax = GetCurrentMaxAuthorized(school_id, district_id, school_nbr).MaxAuthorized;  
+                currentEnrollment = Convert.ToInt32(TempData["EnrollmentForHistogram"]);
+            }
+
+            Bitmap image = new Bitmap(500, 50);
+            Graphics g = Graphics.FromImage(image);
+            var chart1 = new Chart();
+            chart1.Width = 400;
+            chart1.Height = 300;
+            chart1.ChartAreas.Add("xAxis").BackColor = Color.FromArgb(64, ColorTranslator.FromHtml("#FFFFFF"));
+            chart1.Series.Add("xAxis");
+            chart1.Series["xAxis"].Points.AddY(currentMax);
+            chart1.Series["xAxis"].Points.AddY(currentEnrollment);
+            chart1.Series["xAxis"].Font = new Font(chart1.Font.Name, 16, FontStyle.Regular);
+            chart1.Series["xAxis"].IsValueShownAsLabel = true;
+            chart1.Series[0].Points[0].Color = ColorTranslator.FromHtml("#D271E5");
+            chart1.Series[0].Points[1].Color = ColorTranslator.FromHtml("#67A4E6");
+
+            //add title to chart
+            var title = new Title();
+            title.Text = "Enrollment Compared To Max Authorized";
+            title.Font = new Font(chart1.Font.Name, 14, FontStyle.Regular);
+            title.ForeColor = Color.DarkBlue;
+            chart1.Titles.Add(title);
+
+            //y-axis title
+            chart1.ChartAreas[0].AxisY.Title = "Number of Students";
+            chart1.ChartAreas[0].AxisX.TitleForeColor = Color.DarkBlue;
+            chart1.ChartAreas[0].AxisX.MajorGrid.LineDashStyle = ChartDashStyle.NotSet;
+            chart1.ChartAreas[0].AxisY.MajorGrid.LineDashStyle = ChartDashStyle.NotSet;
+            
+            MemoryStream imageStream = new MemoryStream();
+            chart1.Series["xAxis"].Points[0].AxisLabel = "Max Authorized";
+            chart1.Series["xAxis"].Points[1].AxisLabel = "Enrollment";
+
+            chart1.SaveImage(imageStream, ChartImageFormat.Png);
+            chart1.TextAntiAliasingQuality = TextAntiAliasingQuality.SystemDefault;
+            Response.ContentType = "image/png";
+            imageStream.WriteTo(Response.OutputStream);
+            g.Dispose();
+            image.Dispose();
+            return null;
+        }
+
+
+        // Convert the string to Title case
+        public static string ToTitleCase(string name)
+        {
+            // If there are 0 or 1 characters, just return the string.
+            if (name.Length < 2) return name.ToUpper();
+
+            name = name.ToLower();
+            // Split the string into words.
+            string[] words = name.Split(
+                new char[] { },
+                StringSplitOptions.RemoveEmptyEntries);
+
+            // Combine the words.
+            string result = string.Empty;
+            foreach (string word in words)
+            {
+                if (word.Substring(0, 1).Equals("("))
+                {
+                    var tempResult = word.Substring(0, 1) +
+                              word.Substring(1, 1).ToUpper() +
+                              word.Substring(2) + " ";
+
+                    if (tempResult.Contains('-'))
+                    {
+                        int i = 0;
+                        int hyphenIndex = 0;
+
+                        foreach (char c in tempResult)
+                        {
+                            if (c.Equals('-'))
+                            {
+                                hyphenIndex = i;
+                            }
+                            i++;
+                        }
+                        result += tempResult.Substring(0, hyphenIndex) + " - " +
+                                  tempResult.Substring(hyphenIndex + 1, 1).ToUpper() +
+                                  tempResult.Substring(hyphenIndex + 2) + " ";
+                    }
+                    else
+                    {
+                        result += tempResult;
+                    }
+                }
+                else if (word.Contains('-'))
+                {
+                    if (word.Length == 1)
+                    {
+                        result += word + " ";
+                    }
+                    else
+                    {
+                        int i = 0;
+                        var hyphenIndex = 0;
+
+                        foreach (char c in word)
+                        {
+                            if (c.Equals('-'))
+                            {
+                                hyphenIndex = i;
+                            }
+                            i++;
+                        }
+                        result += word.Substring(0, 1).ToUpper() + word.Substring(1, hyphenIndex) +
+                                  word.Substring(hyphenIndex + 1, 1).ToUpper() +
+                                  word.Substring(hyphenIndex + 2) + " ";
+                    }
+                }
+                else
+                {
+                    result +=
+                        word.Substring(0, 1).ToUpper() +
+                        word.Substring(1) + " ";
+                }
+            }
+            return result;
+        }
+
+        // POST: /SchoolProfile/UpdateProfile
+        [HttpPost]
+        [Authorize(Roles = "USOEAdmin, SCSBStaff")]
+        [ValidateInput(false)]
+        [ValidateAntiForgeryToken]
+        public async Task<ActionResult> SubmitMaxAuthTotal(MaxEnrollmentAuthorized maxAuthModel)
+        {
+            var successMessage = string.Empty;
+
+            if (ModelState.IsValid)
+            {
+                if (User.IsInRole("USOEAdmin") || User.IsInRole("SCSBStaff"))
+                {
+                    try
+                    {
+                        //today's date
+                        var todaysDate = DateTime.Now;
+
+                        //Get school year open and close dates for selected date
+                        var schoolYearOpenDate = new DateTime();
+                        var schoolYearCloseDate = new DateTime();
+                        var selectedDate = maxAuthModel.ActiveDate;   //date selected by user to assign to max auth total
+
+                        var aug1SchoolYearOpenDate = new DateTime(DateTime.Now.Year, 8, 1);
+                        var decDate = new DateTime(DateTime.Now.Year, 12, 31);
+                        var july31SchoolYearCloseDate = new DateTime(DateTime.Now.Year, 7, 31) + new TimeSpan(23, 59, 59);
+
+                        //ignore janDate Year
+                        //if selectedDate month is between Aug. 1 and Jan. 1
+                        if (selectedDate.Month >= aug1SchoolYearOpenDate.Month && selectedDate.Month <= decDate.Month)
+                        {
+                            schoolYearOpenDate = new DateTime(selectedDate.Year, 8, 1);
+                            schoolYearCloseDate = new DateTime(selectedDate.Year + 1, 7, 31) + new TimeSpan(23, 59, 59);
+                        }
+                        else
+                        {
+                            schoolYearOpenDate = new DateTime(selectedDate.Year - 1, 8, 1);
+                            schoolYearCloseDate = new DateTime(selectedDate.Year, 7, 31) + new TimeSpan(23, 59, 59);
+                        }
+
+                        //First -- if PK for school's max auth history already has PK match -- update the PK
+                        var schoolsMaxAuthMatchingPK = await db.MaxEnrollmentAuthorized.Where(x => x.school_id == maxAuthModel.school_id && x.district_id == maxAuthModel.district_id && x.school_nbr == maxAuthModel.school_nbr && x.ActiveDate == maxAuthModel.ActiveDate).FirstOrDefaultAsync();
+
+                        if (schoolsMaxAuthMatchingPK != null)
+                        {
+                            //editing existing PK
+                            schoolsMaxAuthMatchingPK.school_id = schoolsMaxAuthMatchingPK.school_id;
+                            schoolsMaxAuthMatchingPK.district_id = schoolsMaxAuthMatchingPK.district_id;
+                            schoolsMaxAuthMatchingPK.school_nbr = schoolsMaxAuthMatchingPK.school_nbr;
+                            schoolsMaxAuthMatchingPK.MaxAuthorized = maxAuthModel.MaxAuthorized;
+                            schoolsMaxAuthMatchingPK.ActiveDate = maxAuthModel.ActiveDate;  //keep active date from before
+                            schoolsMaxAuthMatchingPK.InactiveDate = schoolYearCloseDate;   //change inactive date, modifiedBy and modifiedDate
+                            schoolsMaxAuthMatchingPK.ModifiedBy = maxAuthModel.ModifiedBy;
+                            schoolsMaxAuthMatchingPK.ModifiedDate = todaysDate;
+                            
+                            db.SaveChanges();
+                            successMessage += "<strong>Saved Max Authorized: </strong>" + maxAuthModel.MaxAuthorized + "<br /><br /><strong>Saved Active Date: </strong>" + maxAuthModel.ActiveDate.ToShortDateString();
+                        }
+                        //PK does not exist already 
+                        else
+                        {        
+                            //Query for all the maxAuth rows within schoolYearOpenDate and schoolYaerCloseDate, then get last one for that school year
+                            //Need to update last active maxAuth for the school year selected and save the new maxAuth total as a new row
+                            var lastMaxAuthActive = db.MaxEnrollmentAuthorized.Where(x => x.school_id == maxAuthModel.school_id && x.district_id == maxAuthModel.district_id && x.school_nbr == maxAuthModel.school_nbr && x.ActiveDate >= schoolYearOpenDate && x.ActiveDate <= schoolYearCloseDate).OrderBy(x => x.ActiveDate).ToList().LastOrDefault() != null ? db.MaxEnrollmentAuthorized.Where(x => x.school_id == maxAuthModel.school_id && x.district_id == maxAuthModel.district_id && x.school_nbr == maxAuthModel.school_nbr && x.ActiveDate >= schoolYearOpenDate && x.ActiveDate <= schoolYearCloseDate).OrderBy(x => x.ActiveDate).ToList().LastOrDefault() : null;
+
+                            if (lastMaxAuthActive == null)  //school does not currently have a saved maxAuth total for that school year
+                            {
+                                //save new max auth total
+                                db.MaxEnrollmentAuthorized.Add(new MaxEnrollmentAuthorized()
+                                {
+                                    school_id = maxAuthModel.school_id,
+                                    district_id = maxAuthModel.district_id,
+                                    school_nbr = maxAuthModel.school_nbr,
+                                    ActiveDate = maxAuthModel.ActiveDate,
+                                    MaxAuthorized = maxAuthModel.MaxAuthorized,
+                                    InactiveDate = schoolYearCloseDate,     //inactive at the end of the school year unless overwritten/updated later
+                                    ModifiedDate = todaysDate,  //todays date
+                                    ModifiedBy = maxAuthModel.ModifiedBy
+                                });
+
+                                db.SaveChanges();
+                                successMessage += "<strong>Saved Max Authorized: </strong>" + maxAuthModel.MaxAuthorized + "<br /><br /><strong>Saved Active Date: </strong>" + maxAuthModel.ActiveDate.ToShortDateString();
+                            }
+                            else
+                            {
+                                //only save/update to a new maxAuthorized total if max and/or active date has changed
+                                if (lastMaxAuthActive.MaxAuthorized != maxAuthModel.MaxAuthorized || lastMaxAuthActive.ActiveDate != maxAuthModel.ActiveDate)
+                                {
+                                    //school has saved maxAuth total but it has changed, so edit lastMaxAuthActive's values and then add a new max auth row 
+                                    lastMaxAuthActive.school_id = lastMaxAuthActive.school_id;
+                                    lastMaxAuthActive.district_id = lastMaxAuthActive.district_id;
+                                    lastMaxAuthActive.school_nbr = lastMaxAuthActive.school_nbr;
+                                    lastMaxAuthActive.MaxAuthorized = lastMaxAuthActive.MaxAuthorized;
+                                    lastMaxAuthActive.ActiveDate = lastMaxAuthActive.ActiveDate;  //keep active date from before
+                                    lastMaxAuthActive.InactiveDate = maxAuthModel.ActiveDate;   //change inactive date, modifiedBy and modifiedDate
+                                    lastMaxAuthActive.ModifiedBy = maxAuthModel.ModifiedBy;
+                                    lastMaxAuthActive.ModifiedDate = todaysDate;
+
+                                    //Save new max auth total
+                                    db.MaxEnrollmentAuthorized.Add(new MaxEnrollmentAuthorized()
+                                    {
+                                        school_id = maxAuthModel.school_id,
+                                        district_id = maxAuthModel.district_id,
+                                        school_nbr = maxAuthModel.school_nbr,
+                                        ActiveDate = maxAuthModel.ActiveDate,
+                                        MaxAuthorized = maxAuthModel.MaxAuthorized,
+                                        InactiveDate = schoolYearCloseDate, //inactive at the end of the school year unless overwritten/updated later
+                                        ModifiedDate = todaysDate,
+                                        ModifiedBy = maxAuthModel.ModifiedBy
+                                    });
+
+                                    db.SaveChanges();
+                                    
+                                    successMessage += "<strong>Saved Max Authorized: </strong>" + maxAuthModel.MaxAuthorized + "<br /><br /><strong>Saved Active Date: </strong>" + maxAuthModel.ActiveDate.ToShortDateString();
+                                }
+                                else
+                                {
+                                    //Do nothing - because maxAuthorized has not changed
+                                    successMessage += "<strong>No need for update -- The submited max authorized total equaled the last max authorized total for the school year.</strong>";
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("******************" + ex.Message);
+                    }
+                }
+            }
+            return Content(successMessage);
+        }
+
+        // POST: /SchoolProfile/UpdateProfile
+        [HttpPost]
+        [ValidateInput(false)]
+        [ValidateAntiForgeryToken]
+        public async Task<ActionResult> UpdateSchoolProfile(SchoolProfile schoolProfileModel)
+        {
+            var successMessage = string.Empty;
+
+        [HttpGet]
+        public async Task<JsonResult> GetSchoolProfileUpdate(decimal school_id, decimal district_id, string school_nbr)
+        {
+            var schoolProfile = await db.SchoolProfiles.Where(x => x.school_id == school_id && x.district_id == district_id && x.school_nbr == school_nbr).FirstOrDefaultAsync();
+
+            return Json(schoolProfile, JsonRequestBehavior.AllowGet);
+        }
+
+        //Gets users to display based on SchoolTitlesID 
+        public List<ApplicationUser> getUsersBySchoolTitlesID(int id, List<ApplicationUser> usersForSchool)
+        {
+            List<ApplicationUser> usersWithID;
+
+            switch (id)
+            {
+                case 0:
+                    usersWithID = null;
+                    break;
+                default:
+                    usersWithID = usersForSchool.Where(x => x.SchoolTitlesID == id).ToList();
+                    break;
+            }
+            return usersWithID;
+        }
+
+        //Fiscal Year: July 1, 2016 through June 30, 2017 with "FYxx" being the second calendar year (FY2017). 
+        [HttpGet]
+        public int GetFiscalYear()
+        {
+            DateTime fiscalDate;
+            DateTime january;
+            DateTime todaysDate = new DateTime(DateTime.Now.Year, DateTime.Now.Month, DateTime.Now.Day);
+
+            //Get correct year for January
+            if (todaysDate.Month >= 7 && todaysDate.Month <= 12)
+            {
+                january = new DateTime(DateTime.Now.Year + 1, 1, 1);
+            }
+            // currentDate.Month >= 1 && currentDate.Month <= 6
+            else
+            {
+                january = new DateTime(DateTime.Now.Year, 1, 1);
+            }
+
+            if (todaysDate < january)
+            {
+                fiscalDate = new DateTime((DateTime.Now.Year + 1), 6, 30);
+            }
+            else
+            {
+                fiscalDate = new DateTime((DateTime.Now.Year), 6, 30);
+            }
+
+            int fiscalYear = fiscalDate.Year;
+
+            return fiscalYear;
+        }          
+
+		  if (ModelState.IsValid)
+            {
+                //Saved SchoolProfile for school
+                var schoolsProfile = await db.SchoolProfiles.Where(x => x.school_id == schoolProfileModel.school_id && x.district_id == schoolProfileModel.district_id && x.school_nbr == schoolProfileModel.school_nbr).FirstOrDefaultAsync() != null ? await db.SchoolProfiles.Where(x => x.school_id == schoolProfileModel.school_id && x.district_id == schoolProfileModel.district_id && x.school_nbr == schoolProfileModel.school_nbr).FirstOrDefaultAsync() : null;
+
+                try
+                {
+                    //SchoolProfile - update database           
+                    if (schoolsProfile != null)
+                    {
+                        schoolsProfile.school_id = schoolProfileModel.school_id;
+                        schoolsProfile.district_id = schoolProfileModel.district_id;
+                        schoolsProfile.school_nbr = schoolProfileModel.school_nbr;
+                        schoolsProfile.MissionStatement = schoolProfileModel.MissionStatement;
+                        schoolsProfile.EducationProgram = schoolProfileModel.EducationProgram;
+                    }
+                    else
+                    {
+                        db.SchoolProfiles.Add(new SchoolProfile()
+                        {
+                            school_id = schoolProfileModel.school_id,
+                            district_id = schoolProfileModel.district_id,
+                            school_nbr = schoolProfileModel.school_nbr,
+                            MissionStatement = schoolProfileModel.MissionStatement,
+                            EducationProgram = schoolProfileModel.EducationProgram
+                        });
+                    }
+
+                    db.SaveChanges();       //Save to database here
+                    successMessage += "<strong>Mission Statement: </strong> " + schoolProfileModel.MissionStatement + "<br /><br /><strong>Education Program:</strong> " + schoolProfileModel.EducationProgram + "<br /><br />";
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("******************" + ex.Message);
+                }
+            } else
+            {
+                successMessage += "Sorry - Unable to update the School Profile table at this time. The ModelState was invalid.";
+            }
+            return Content(successMessage);
+        }
