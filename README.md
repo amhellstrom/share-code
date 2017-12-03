@@ -1,2 +1,2 @@
 # share-code
-Place to share code.
+Place to share some code for MVC programmers.
