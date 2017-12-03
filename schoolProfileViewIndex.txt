@@ -1,0 +1,1606 @@
+@using UCAP.Models
+@model UCAP.Models.SchoolProfileViewModel
+
+@{
+    ViewBag.Title = "School Profile";
+}
+<head>
+    <link rel="stylesheet" href="//code.jquery.com/ui/1.11.4/themes/smoothness/jquery-ui.css">
+
+    <style>
+        .actionBtn {
+            width: 100%;
+        }
+
+        #percentOfMax {
+            font-size: 60px;
+        }
+
+        #percentOfMaxLabel {
+            font-size: 24px;
+            font-weight: lighter;
+        }
+
+        #getEnrollmentHistogram, #getPercentOfMaxCentered {
+            text-align: center;
+        }
+
+        .loader {
+            border-radius: 50%;
+            border-top: 20px solid white;
+            border-left: 20px solid blue;
+            border-right: 20px solid blue;
+            border-bottom: 20px solid white;
+            width: 120px;
+            height: 120px;
+            z-index: 9999;
+            position: absolute;
+            top: 25%;
+            left: 50%;
+            display: inline-block;
+            -webkit-animation: spin 2s linear infinite;
+            animation: spin 2s linear infinite;
+        }
+
+        @@-webkit-keyframes spin {
+            0% {
+                -webkit-transform: rotate(0deg);
+            }
+
+            100% {
+                -webkit-transform: rotate(360deg);
+            }
+        }
+
+        @@keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        #dropdownSchools {
+            display: none;
+        }
+
+        #dropdownSchools, #dropdownDistricts, #dropdownFiscalYears {
+            height: 40px;
+            width: 100%;
+        }
+
+        #SchoolDetailScroller {
+            display: none;
+            height: 35px;
+            width: 100%;
+            background-color: white;
+            position: fixed;
+            z-index: 9999;
+            left: 0;
+            top: 0;
+            padding: .5em;
+        }
+
+        /* scroll results */
+        .ui-autocomplete {
+            max-height: 250px;
+            overflow-y: auto;
+            /* prevent horizontal scrollbar */
+            overflow-x: hidden;
+            /* add padding for vertical scrollbar */
+            padding-right: 5px;
+        }
+
+            .ui-autocomplete li {
+                font-size: 14px;
+            }
+
+        /* IE 6 doesn't support max-height
+        * we use height instead, but this forces the menu to always be this tall
+        */
+        * html .ui-autocomplete {
+            height: 250px;
+        }
+
+        tr {
+            padding-bottom: 5px;
+            padding-top: 5px;
+        }
+
+        .boldLabel {
+            font-weight: bolder;
+        }
+
+        .lighterText {
+            font-weight: lighter;
+        }
+
+        .table th,
+        .table td,
+        .table-bordered,
+        .table-condensed,
+        .table-hover {
+            border-bottom-width: 1px !important;
+            border-color: black !important;
+        }
+
+        table {
+            font-size: 14px;
+            margin-right: 15px;
+            table-layout: fixed;
+        }
+
+        .tableLength {
+            width: 95%;
+        }
+
+        td {
+            padding-left: 3px !important;
+            padding-right: 3px !important;
+        }
+
+        #successUpdateModalContent {
+            padding-left: 10px;
+        }
+
+        .modal-dialog-center {
+            margin-top: 15%;
+        }
+
+        .modal-header {
+            padding: 9px 15px;
+            border-bottom: 1px solid #eee;
+            background-color: #b2d1ff;
+            -webkit-border-top-left-radius: 5px;
+            -webkit-border-top-right-radius: 5px;
+            -moz-border-radius-topleft: 5px;
+            -moz-border-radius-topright: 5px;
+            border-top-left-radius: 5px;
+            border-top-right-radius: 5px;
+        }
+
+        div {
+            padding: 3px 0px 3px 0px;
+        }
+
+        #quickScrollBody {
+            text-align: center;
+        }
+    </style>
+</head>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.11.2/moment.min.js"></script>
+<script src="~/Scripts/jquery.visible.min.js"></script>
+
+@section pageScripts{
+    <script type="text/javascript">
+        $(document).ready(function () {
+            $("#submitMaxAuthButton").hide();
+            $('#submitProfileButton').hide();
+            $("#goToProjections").hide();
+            $('#missionStatementUpdate').prop("disabled", true);
+            $('#educationProgramUpdate').prop("disabled", true);
+            $('#maxAuthEnrollmentSubmit').prop("disabled", true);
+            $('.datepicker').prop("disabled", true);
+            $('#enrollmentHistory').hide();
+            $('#maxAuthHistory').hide();
+            $('#percentOfMaxLabel').hide();
+            $('#enrollmentHistogram').hide();
+
+            $(".datepicker").datepicker();  //datepicker for max authorized
+
+            $('#userId').val("@ViewBag.UserId");
+            $('#usersSchoolID').val(@ViewBag.SchoolId);
+            $('#district_id').val(@ViewBag.DistrictId);
+            $('#usersSchoolNBR').val("@ViewBag.SchoolNbr");
+            $('#DistrictNbr').val("@ViewBag.DistrictNbr");
+            var districtFromSchoolProfile = $('#DistrictNbr').val();
+
+            //Autocomplete dropdowns if User is not USOEAdmin or SCSBStaff
+            if (districtFromSchoolProfile !== "") {
+                $('#dropdownDistricts').val(districtFromSchoolProfile);     //preselected option for district dropdown
+
+                var districtNbr = ($('#dropdownDistricts option:selected').val()).toString();
+                $('#dropdownDistricts').prop("disabled", true); //Disable so LEAs cannot look at other districts and schools
+
+                $.ajax({
+                    type: "GET",
+                    url: "/SchoolProfile/GetSchoolsForDistrict",
+                    data: "district_nbr=" + districtNbr,
+                    dataType: "json",
+
+                    success: function (data) {
+                        var list = $('#dropdownSchools');
+                        list.empty();
+                        list.append($('<option></option>').val([-1, -1, data[0].district_id]).text("--Select School--").attr("disabled", true));
+                        for (var i = 0; i < data.length; i++) {
+                            list.append(
+                                $('<option></option>').val([data[i].school_nbr, data[i].school_id, data[i].district_id]).text(data[i].school_name)
+                            );
+                        }
+
+                        //only one school for LEA - autoselect school
+                        if (data.length === 1) {
+                            $('#dropdownSchools').val(data[0].school_nbr + "," + data[0].school_id + "," + data[0].district_id);  //preselect option for school dropdown
+                            loadSchool(data[0].school_id, data[0].district_id, data[0].school_nbr);
+                            $('#dropdownSchools').prop("disabled", true);
+                        } else if (@ViewBag.SchoolId !== -1) {
+                            //user can only view their assigned school
+                            var usersSchoolNbr = $('#usersSchoolNBR').val();
+                            var usersSchoolId = $('#usersSchoolID').val();
+                            var districtId = $('#district_id').val();
+
+                            $('#dropdownSchools').val(usersSchoolNbr + "," + usersSchoolId + "," + districtId); //preselect option for school dropdown
+                            loadSchool(usersSchoolId, districtId, usersSchoolNbr);
+                            $('#dropdownSchools').prop("disabled", true);
+                        } else {
+                            //User is assigned to LEA -- can view any school from the LEA
+                            $('#dropdownSchools').val(-1 + "," + -1 + "," + data[0].district_id);
+                        }
+
+                        $('#dropdownSchools').css("display", "block");
+                    },
+                    error: function () {
+                        console.log("Error with loading schools of district into dropdownlist.");
+                    }
+                }); //end AJAX
+            }
+
+            function resetPage() {
+                //CACTUS
+                $('#SchoolName').html("").val("");
+                $('#SchoolLea').html("").val("");
+                $('#schoolAddress1').html("").val("");
+                $('#schoolAddress2').html("").val("");
+                $('#schoolPhone').html("").val("");
+                $('#SchoolID').html("").val("");
+                $('#schoolGradesAuth').html("").val("");
+                $('#DistrictID').html("").val("");
+                $('#schoolsDistrict').html("").val("");
+                $('#schoolsWebsite').html("").val("");
+                $('#schoolCharteredBy').html("").val("");
+                $('#schoolDateOpen').html("").val("");
+                //School Details
+                $('#missionStatement').html("").val("");
+                $('#educationProgram').html("").val("");
+                $('#documentsUploadedAmt').html("").val("");
+                $('#numberUsers').html("").val("");
+                //Student Enrollment Counts
+                $('#schoolGradesAuth').html("").val("");
+                $('#schoolGradesAuth').html("").val("");
+                $("#enrollmentHistogramImg").attr("src", "").hide();            //changing the src requires img to reload - helps us reload when user selects a new school to view
+                $('#enrollmentHistory').hide();
+                $('#maxAuthHistory').hide();
+                $('#actualEnrollmentDates').html("").val("");
+                $('#actualFinalTotals').html("").val("");
+                $('#actualPKTotals').html("").val("");
+                $('#actualKTotals').html("").val("");
+                $('#actual1Totals').html("").val("");
+                $('#actual2Totals').html("").val("");
+                $('#actual3Totals').html("").val("");
+                $('#actual4Totals').html("").val("");
+                $('#actual5Totals').html("").val("");
+                $('#actual6Totals').html("").val("");
+                $('#actual7Totals').html("").val("");
+                $('#actual8Totals').html("").val("");
+                $('#actual9Totals').html("").val("");
+                $('#actual10Totals').html("").val("");
+                $('#actual11Totals').html("").val("");
+                $('#actual12Totals').html("").val("");
+                $('.schoolNameModal').html("").val("");
+                $('#maxAuthActiveDates').html("").val("");
+                $('#maxAuthTotals').html("").val("");
+                $('#maxAuthUpdatedBy').html("").val("");
+                $('#percentOfMax').html("").val("");
+                $('#percentOfMaxLabel').hide();
+                //Board Members
+                $('#boardMembersAmt').html("").val("");
+                $('#chairNames').html("").val("");
+                $('#memberNames').html("").val("");
+                $('#directorTitle').html("").val("");
+                $('#directorName').html("").val("");
+                $('#businessManagers').html("").val("");
+                //Submit Update School Profile
+                $('#maxAuthEnrollmentSubmit').html("").val("");
+                $('#missionStatementUpdate').html("").val("");
+                $('#educationProgramUpdate').html("").val("");
+            };
+
+            //Picked a district to view their school's projections
+            $('#dropdownDistricts').change(function () {           
+                var districtNbr = $('#dropdownDistricts option:selected').val();
+                resetPage();
+
+                $.ajax({
+                    type: "GET",
+                    url: "/SchoolProfile/GetSchoolsForDistrict",
+                    data: "district_nbr=" + districtNbr,
+                    dataType: "text",
+
+                    success: function (data) {
+                        var data = $.parseJSON(data);
+                        var list = $('#dropdownSchools');
+
+                        list.empty();
+                        list.append($('<option></option>').val([-1, -1, -1]).text("--Select School--").css('color', '#000000'));
+
+                        //for each option - check if school is closed - color red
+                        for (var i = 0; i < data.length; i++)
+                        {
+                            var isClosed = false;
+                            var j = 0;
+                            var schoolsClosed = @Html.Raw(Json.Encode(ViewBag.ClosedSchools));
+
+                        for (j = 0; j < schoolsClosed.length; j++) {
+                            if (schoolsClosed[j] === data[i].school_name) {
+                                isClosed = true;
+                                break;
+                            }
+                        }
+
+                        if (isClosed === true) {
+                            list.append(
+                            $('<option></option>').val([data[i].school_nbr, data[i].school_id, data[i].district_id]).text(data[i].school_name).css('color', "#ff0000"));
+                        }
+                        else {
+                            list.append(
+                                $('<option></option>').val([data[i].school_nbr, data[i].school_id, data[i].district_id]).text(data[i].school_name));
+                            }
+                        }
+
+                        $('#dropdownSchools').css("display", "block");
+                    },
+                    error: function () {
+                        console.log("Error with loading schools of district into dropdownlist.");
+                    }
+                }); //end AJAX
+            });
+
+            $('#dropdownSchools').change(function () {
+                resetPage();
+                var school = $('#dropdownSchools option:selected').val();
+                var schoolValues = school.split(',');
+                var schoolId = schoolValues[1];
+                var districtId = schoolValues[2];
+                var schoolNbr = schoolValues[0];       
+
+                loadSchool(schoolId, districtId, schoolNbr);
+            });
+
+            //Load school once selected
+            function loadSchool(schoolId, districtId, schoolNbr) {
+                $('.loader').fadeIn();
+                $("#submitMaxAuthButton").show();
+                $('#submitProfileButton').show();
+                $('#missionStatementUpdate').prop("disabled", false);
+                $('#educationProgramUpdate').prop("disabled", false);
+                $('#maxAuthEnrollmentSubmit').prop("disabled", false);
+                $('.datepicker').prop("disabled", false);
+                $('#enrollmentHistory').show();
+                $('#maxAuthHistory').show();
+
+                if (schoolId === -1) {
+                } else {
+                    var functionDef = $.Deferred();
+                    //Hidden elements don't fire automatically, so manual trigger is required
+                    $("#newOrUpdate").val("update").trigger("change");
+
+                    //Temporarily stop username checks
+                    $("#SchoolName").unbind();
+
+                    return new Promise(function(resolve, reject) {
+                        $.ajax({
+                            type: "POST",
+                            url: "/SchoolProfile/GetSchoolDetails",
+                            data: {
+                                "school_id": schoolId,
+                                "district_id": districtId,
+                                "school_nbr": schoolNbr
+                            },
+                            dataType: "json",
+
+                            success: function(data) {
+                                //format data for use in autocomplete
+                                if (!data.length) {
+                                    alert("Sorry, school cannot be viewed at this time");
+                                }
+
+                                //If an LEA do not allow access to Projections through Go To Projections link
+                                var isProjectionsClosed = ("@ViewBag.IsProjectionsClosed").toLowerCase();
+                                if ((data[0].be_school.school_nbr).search(data[0].be_school.district_nbr) != -1) {
+                                    $("#goToProjections").hide();
+                                } else if (isProjectionsClosed == "true") {
+                                    $("#goToProjections").hide();
+                                } else {
+                                    $("#goToProjections").show();
+                                }
+
+                                $('#SchoolNameScroller').html(data[0].be_school.school_name);
+
+                                $('#SchoolName').val(data[0].be_school.school_name);
+                                $('#SchoolName').html(data[1]); //Formats school name to Title Case
+                                $('.schoolNameModal').html(data[1]);    //puts school name in View Enrollment History Modal and View Max Authorized History Modal
+
+                                $('#SchoolLea').val(data[10]);
+                                $('#SchoolLea').html(data[10]); //Formats school LEA name to Title Case
+
+                                if (data[0].be_institution !== null) {
+                                    if (data[0].be_institution.address1 !== null) {
+                                        $('#schoolAddress1').val(data[0].be_institution.address1);
+                                        $('#schoolAddress1').html(data[0].be_institution.address1);
+                                    } else {
+                                        $('#schoolAddress1').html('No address on file.');
+                                    }
+
+                                    $('#schoolAddress2').val(data[0].be_institution.city +
+                                        ", " +
+                                        data[0].be_institution.state +
+                                        " " +
+                                        data[0].be_institution.zipcode);
+                                    $('#schoolAddress2').html(data[0].be_institution.city +
+                                        ", " +
+                                        data[0].be_institution.state +
+                                        " " +
+                                        data[0].be_institution.zipcode);
+
+                                    if (data[0].be_institution.web_address === null) {
+                                        $('#schoolsWebsite').html("No website listed.");
+                                        $('#schoolsWebsite').val("No website listed.");
+                                    } else {
+                                        $('#schoolsWebsite').val(data[0].be_institution.web_address);
+                                        $('#schoolsWebsite').html(data[0].be_institution.web_address);
+                                        if (data[0].be_institution.web_address.indexOf("http://") >= 0) {
+                                            $('label[for="schoolsWebsite"]')
+                                                .wrap("<a target=\"_blank\" href=\'" +
+                                                    data[0].be_institution.web_address +
+                                                    "\'></a>");
+                                        } else {
+                                            $('label[for="schoolsWebsite"]')
+                                                .wrap("<a target=\"_blank\" href=\'" +
+                                                    "http://" +
+                                                    data[0].be_institution.web_address +
+                                                    "\'></a>");
+                                        }
+
+                                    }
+
+                                    $('#schoolsDistrict').val(data[11]);
+                                    $('#schoolsDistrict').html(data[11]);
+
+                                } else {
+                                    $('#schoolAddress1').html('No address on file.');
+                                    $('#schoolsWebsite').html("No website on file.");
+                                    $('#schoolsDistrict').html("No district on file.");
+                                }
+
+
+                                if (data[0].be_school.phone_1 !== null) {
+                                    $('#schoolPhone').val(data[0].be_school.phone_1);
+                                    var phone = data[0].be_school.phone_1,
+                                        formattedPhone = '(' +
+                                            phone.substr(0, 3) +
+                                            ')' +
+                                            phone.substr(3, 3) +
+                                            '-' +
+                                            phone.substr(6, 4);
+                                    $('#schoolPhone').html(formattedPhone);
+                                } else {
+                                    $('#schoolPhone').html('No phone number given.');
+                                }
+
+                                if (data[0].be_school.school_id !== null) {
+                                    $("#SchoolID").val(data[0].be_school.school_id);
+                                    $("#SchoolID").html(data[0].be_school.school_id);
+                                    $('#DistrictNbr').val(data[0].be_school.district_nbr);
+                                } else {
+                                    $("#SchoolID").html('No school id given.');
+                                }
+
+                                if (data[0].be_school.district_id !== null) {
+                                    $("#DistrictID").val(data[0].be_school.district_id);
+                                    $("#DistrictID").html(data[0].be_school.district_id);
+                                } else {
+                                    $("#DistrictID").html('No school id given.');
+                                }
+
+                                $('#school_nbr').val(data[0].be_school.school_nbr);
+
+                                if (data[0].be_school.date_opened !== null) {
+                                    $('#schoolDateOpen').val(data[0].be_school.date_opened);
+                                    var dateString = moment(data[0].be_school.date_opened, "YYYY-MM-DD")
+                                        .format("MM-DD-YYYY");
+                                    $('#schoolDateOpen').html(dateString);
+                                } else {
+                                    $('#schoolDateOpen').html('No opened date on file.');
+                                }
+
+                                if (data[0].be_school_year === null) {
+                                    $('#schoolGradesAuth').html('N/A');
+                                } else {
+                                    $('#schoolGradesAuth').val(data[0].be_school_year.grade_low + " - " + data[0].be_school_year.grade_high);
+
+                                    if (data[0].be_school_year.grade_low === "00") {
+                                        $('#schoolGradesAuth').html("K - " + data[0].be_school_year.grade_high);
+                                    } else if (data[0].be_school_year.grade_low === "-1" && data[0].be_school_year.grade_high === "-1") {
+                                        $('#schoolGradesAuth').html("PK");
+                                    } else if (data[0].be_school_year.grade_low === "-1" && data[0].be_school_year.grade_high !== "-1") {
+                                        $('#schoolGradesAuth').html("PK - " + data[0].be_school_year.grade_high);
+                                    } else {
+                                        $('#schoolGradesAuth').html(data[0].be_school_year.grade_low + " - " + data[0].be_school_year.grade_high);
+                                    }
+                                }
+
+                                if (data[0].be_school.chartered_by !== null) {
+                                    switch (data[0].be_school.chartered_by) {
+                                    case 1:
+                                        $('#schoolCharteredBy').html("State Charter School Board");
+                                        break;
+                                    case 2:
+                                        $('#schoolCharteredBy').html("Local Education Agency");
+                                        break;
+                                    case 3:
+                                        $('#schoolCharteredBy').html("Higher Ed");
+                                        break;
+                                    case 4:
+                                        $('#schoolCharteredBy').html("UCAT");
+                                        break;
+                                    default:
+                                        $('#schoolCharteredBy').html("Not chartered.");
+                                        break;
+                                    }
+                                    $('#schoolCharteredBy').val(data[0].be_school.chartered_by);
+                                } else {
+                                    $('#schoolCharteredBy').html("Not chartered.");
+                                }
+
+                                if (data[0].SchoolProfile !== null) {
+                                    if (data[0].SchoolProfile.MissionStatement !== null) {
+                                        $('#missionStatement').val(data[0].SchoolProfile.MissionStatement);
+                                        $('#missionStatement').html(data[0].SchoolProfile.MissionStatement);
+                                        $('#missionStatementUpdate').val($('#missionStatement').val());
+                                        $('#missionStatementUpdate').html($('#missionStatement').html());
+                                    } else {
+                                        $('#missionStatement').html("No mission statement saved.");
+                                        $('#missionStatement').val("No mission statement saved.");
+                                        $('#missionStatementUpdate').val($('#missionStatement').val());
+                                        $('#missionStatementUpdate').html($('#missionStatement').html());
+                                    }
+
+                                    if (data[0].SchoolProfile.EducationProgram !== null) {
+                                        $('#educationProgram').val(data[0].SchoolProfile.EducationProgram);
+                                        $('#educationProgram').html(data[0].SchoolProfile.EducationProgram);
+                                        $('#educationProgramUpdate').val($('#educationProgram').val());
+                                        $('#educationProgramUpdate').html($('#educationProgram').html());
+                                    } else {
+                                        $('#educationProgram').html("No education program saved.");
+                                        $('#educationProgram').val("No education program saved.");
+                                        $('#educationProgramUpdate').val($('#educationProgram').val());
+                                        $('#educationProgramUpdate').html($('#educationProgram').html());
+                                    }
+
+                                    //1 is SCSB, 2 is LEA, 3 is HigherEd, 4 is UCAT
+                                    //if (data[0].be_school.dist_served !== 0) {
+                                    //    $('#distProvided').val(data[0].be_school.dist_served);      //Need to import into database distance education served
+                                    //    $('#distProvided')
+                                    //        .html("<span class=\"glyphicon glyphicon-ok\" style=\"color: green;\"></span> Yes");
+                                    //} else {
+                                    //    $('#distProvided')
+                                    //        .html(
+                                    //        "<span class=\"glyphicon glyphicon-remove\" style=\"color: red;\"></span> No");
+                                    //}
+                                } else {
+                                    $('#missionStatement').html("No mission statement.");
+                                    $('#missionStatement').val("No mission statement.");
+                                    $('#missionStatementUpdate').val($('#missionStatement').val());
+                                    $('#missionStatementUpdate').html($('#missionStatement').html());
+                                    $('#educationProgram').html("No education program.");
+                                    $('#educationProgram').val("No education program.");
+                                    $('#educationProgramUpdate').val($('#educationProgram').val());
+                                    $('#educationProgramUpdate').html($('#educationProgram').html());
+                                    $('#authorizedEnrollment').val(0);
+                                    $('#distProvided').html("");
+                                }
+
+                                if (data[13] !== null) {
+                                    var maxAuth3Percent = data[13].MaxAuthorized * 0.03;
+                                    $('#maxAuthEnrollment').val(data[13].MaxAuthorized);
+                                    $('#maxAuthEnrollment').html(data[13].MaxAuthorized);
+                                } else {
+                                    $('#maxAuthEnrollment').val(0);
+                                    $('#maxAuthEnrollment').html(0);
+                                }
+
+                                if (data[2] === null) {
+                                    $('#documentsUploadedAmt').html(0);
+                                } else {
+                                    $('#documentsUploadedAmt').val(data[2]);
+                                    $('#documentsUploadedAmt').html(data[2]);
+                                }
+
+                                if (data[3] === null) {
+                                    $('#numberUsers').html(0);
+                                } else {
+                                    $('#numberUsers').val(data[3]);
+                                    $('#numberUsers').html(data[3]);
+                                }
+
+                                $('#boardMembersAmt').val(data[4]);
+                                $('#boardMembersAmt').html(data[4]);
+
+                                $('#chairNames').html(formatNames(5, data));
+                                $('#memberNames').html(formatNames(6, data));
+                                $('#businessManagers').html(formatNames(7, data));
+
+                                if (data[8] !== null) {
+                                    $('#directorTitle').html(" - " + data[8]);
+                                } else {
+                                    $('#directorTitle').html("No Title.");
+                                }
+
+                                $('#directorName').html(formatNames(9, data));
+
+                                //Load max auth history modal
+                                if (data[14] != null && data[15] != null) {
+                                    var activeDates = '';
+                                    var maxTotals = '';
+                                    var maxUpdatedBy = '';
+
+                                    for (var i = 0; i < data[14].length; i++) {
+                                        var activeDateString = moment(data[14][i].ActiveDate, "YYYY-MM-DD")
+                                            .format("MM-DD-YYYY");
+                                        activeDates += activeDateString + "<br />";
+
+                                        maxTotals += data[14][i].MaxAuthorized + "<br />";
+                                    }
+
+                                    $('#maxAuthActiveDates').html(activeDates);
+                                    $('#maxAuthTotals').html(maxTotals);
+
+                                    for (var i = 0; i < data[15].length; i++) {
+                                        maxUpdatedBy += data[15][i] + "<br />";
+                                    }
+                                    $('#maxAuthUpdatedBy').html(maxUpdatedBy);
+                                }
+                                else {
+                                    $('#maxAuthDates').html("No data saved.");
+                                }
+
+                                var breakDownOfGrades = data[12];
+                                GetEnrollment(breakDownOfGrades);
+                                GetPercentOfMax();
+
+                                $('.loader').fadeOut();
+
+                                //Enable scroller appearance
+                                enableScroller();
+
+                                resolve();
+                                functionDef.resolve();
+                            },
+                            error: function() {
+                                console.log("Error with loadSchool's ajax");
+                                reject();
+                                functionDef.reject();
+                            }
+                        }); //end AJAX
+                        return functionDef.promise();
+                    });
+                }
+            };
+
+            //Gets and displays the Percent of Max in Student Enrollment Counts section
+            function GetPercentOfMax() {
+                var currentEnrollment = $('#currentEnrollment').val();
+                var currentMaxAuthTotal = $('#maxAuthEnrollment').val();
+
+                var percent = ((currentEnrollment / currentMaxAuthTotal) * 100).toFixed(1);
+
+                if (percent !== null && percent !== undefined && percent !== "NaN") {
+                    $('#percentOfMax').html(percent.toString() + " %");
+                    $('#percentOfMaxLabel').show();
+
+                    $("#enrollmentHistogramImg").attr("src", "SchoolProfile/CreateEnrollmentHistogram/");
+                    $('#enrollmentHistogram').show();
+                    $('#percentOfMaxLabel').show();
+                }
+                
+                $('#getEnrollmentHistogram').show();
+                $('#enrollmentHistogramImg').show();
+            };
+
+            //Autoload October 1 enrollment data
+            function GetEnrollment(breakdownByGrades) {
+                if (breakdownByGrades !== null) {
+                    $('#enrollmentHistory').css("display", "block");
+
+                    //Displays Enrollment By Grade table
+                    var SchoolYear = '';
+                    var prekindergarten = '';
+                    var kindergarten = '';
+                    var first = '';
+                    var second = '';
+                    var third = '';
+                    var fourth = '';
+                    var fifth = '';
+                    var sixth = '';
+                    var seventh = '';
+                    var eighth = '';
+                    var ninth = '';
+                    var tenth = '';
+                    var eleventh = '';
+                    var twelfth = '';
+                    var transactionFirstToSixth = '';
+                    var transactionSeventhToEighth = '';
+                    var transactionNinthToTwelfth = '';
+                    var total = '';
+                    var sumOf5years = 0;
+
+                    var countYearsSubmitted = Object.keys(breakdownByGrades).length;
+                    var j = 0;
+
+                    for (var i = countYearsSubmitted - 1; i >= 0; i--) {
+                        var ObjectDictionary = Object.keys(breakdownByGrades)[i];
+                        var dictionary = (breakdownByGrades[ObjectDictionary]);
+                        var schoolYear = (Number(ObjectDictionary)).toString();
+
+                        var prekindergartenEnrollment = dictionary["-1"];
+                        var kindergartenEnrollment = dictionary["00"];
+                        var firstEnrollment = dictionary["01"];
+                        var secondEnrollment = dictionary["02"];
+                        var thirdEnrollment = dictionary["03"];
+                        var fourthEnrollment = dictionary["04"];
+                        var fifthEnrollment = dictionary["05"];
+                        var sixthEnrollment = dictionary["06"];
+                        var seventhEnrollment = dictionary["07"];
+                        var eighthEnrollment = dictionary["08"];
+                        var ninthEnrollment = dictionary["09"];
+                        var tenthEnrollment = dictionary["10"];
+                        var eleventhEnrollment = dictionary["11"];
+                        var twelfthEnrollment = dictionary["12"];
+
+                        SchoolYear += schoolYear + '</br>';
+                        prekindergarten += prekindergartenEnrollment + '</br>';
+                        kindergarten += kindergartenEnrollment + '</br>';
+                        first += firstEnrollment + '</br>';
+                        second += secondEnrollment + '</br>';
+                        third += thirdEnrollment + '</br>';
+                        fourth += fourthEnrollment + '</br>';
+                        fifth += fifthEnrollment + '</br>';
+                        sixth += sixthEnrollment + '</br>';
+                        seventh += seventhEnrollment + '</br>';
+                        eighth += eighthEnrollment + '</br>';
+                        ninth += ninthEnrollment + '</br>';
+                        tenth += tenthEnrollment + '</br>';
+                        eleventh += eleventhEnrollment + '</br>';
+                        twelfth += twelfthEnrollment + '</br>';
+
+                        var sumPK = Number(prekindergartenEnrollment);
+
+                        var sum1to6 = (Number(kindergartenEnrollment) + Number(firstEnrollment) + Number(secondEnrollment) + Number(thirdEnrollment) + Number(fourthEnrollment) + Number(fifthEnrollment) + Number(sixthEnrollment));
+                        transactionFirstToSixth += sum1to6 + "<br />";
+
+                        var sum7to8 = (Number(seventhEnrollment) + Number(eighthEnrollment));
+                        transactionSeventhToEighth += sum7to8 + "<br />";
+
+                        var sum9to12 = (Number(ninthEnrollment) + Number(tenthEnrollment) + Number(eleventhEnrollment) + Number(twelfthEnrollment));
+                        transactionNinthToTwelfth += sum9to12 + "<br />";
+
+                        var sumAllGrades = sumPK + sum1to6 + sum7to8 + sum9to12;
+
+                        total += sumAllGrades + '</br>';
+                    }
+
+                    $('#actualPKTotals').html(prekindergarten);
+                    $('#actualKTotals').html(kindergarten);
+                    $('#actual1Totals').html(first);
+                    $('#actual2Totals').html(second);
+                    $('#actual3Totals').html(third);
+                    $('#actual4Totals').html(fourth);
+                    $('#actual5Totals').html(fifth);
+                    $('#actual6Totals').html(sixth);
+                    $('#actual7Totals').html(seventh);
+                    $('#actual8Totals').html(eighth);
+                    $('#actual9Totals').html(ninth);
+                    $('#actual10Totals').html(tenth);
+                    $('#actual11Totals').html(eleventh);
+                    $('#actual12Totals').html(twelfth);
+                    $('#actualFinalTotals').html(total);
+
+                    $('#actualEnrollmentDates').html(SchoolYear);
+
+                    //Get current enrollment
+                    var lastSubmittedEnrollmentYear = Object.keys(breakdownByGrades)[countYearsSubmitted - 1];   //Get last submitted enrollment count of Oct.1
+                    var currentYearEnrollments = (breakdownByGrades[lastSubmittedEnrollmentYear]);
+                    var fiscalYear = ObjectDictionary;
+
+                    if (lastSubmittedEnrollmentYear != null) {
+                        //Dynamic enrollment label - get Oct. 1 count of this fiscal year (If FY 2017 then get Oct 2016)
+                        var october1Year = (parseInt(lastSubmittedEnrollmentYear) - 1).toString();
+                        $('#enrollmentLabel').html("   Enrollment as of Oct " + october1Year + ":");
+
+                        $('#currentEnrollment').val(currentYearEnrollments["-1"] + currentYearEnrollments["00"] + currentYearEnrollments["01"] + currentYearEnrollments["02"] + currentYearEnrollments["03"] + currentYearEnrollments["04"] + currentYearEnrollments["05"] + currentYearEnrollments["06"] + currentYearEnrollments["07"] + currentYearEnrollments["08"] + currentYearEnrollments["09"] + currentYearEnrollments["10"] + currentYearEnrollments["11"] + currentYearEnrollments["12"]);
+
+                        $('#currentEnrollment').html((currentYearEnrollments["-1"] + currentYearEnrollments["00"] + currentYearEnrollments["01"] + currentYearEnrollments["02"] + currentYearEnrollments["03"] + currentYearEnrollments["04"] + currentYearEnrollments["05"] + currentYearEnrollments["06"] + currentYearEnrollments["07"] + currentYearEnrollments["08"] + currentYearEnrollments["09"] + currentYearEnrollments["10"] + currentYearEnrollments["11"] + currentYearEnrollments["12"]).toString());
+                    }
+                    else {
+                        $('#currentEnrollment').html("No data saved.");
+                    }
+                }
+                else {
+                    $('#actualPKTotals').html("");
+                    $('#actualKTotals').html("");
+                    $('#actual1Totals').html("");
+                    $('#actual2Totals').html("");
+                    $('#actual3Totals').html("");
+                    $('#actual4Totals').html("");
+                    $('#actual5Totals').html("");
+                    $('#actual6Totals').html("");
+                    $('#actual7Totals').html("");
+                    $('#actual8Totals').html("");
+                    $('#actual9Totals').html("");
+                    $('#actual10Totals').html("");
+                    $('#actual11Totals').html("");
+                    $('#actual12Totals').html("");
+                    $('#actualFinalTotals').html("");
+                    $('#actualEnrollment').html("No data saved.");
+                }
+            };
+
+            function formatNames(j, data) {
+                var addNames = [];
+
+                if (!data[j].length)
+                {
+                    addNames += "No names on file.";
+                }
+                else
+                {
+                    for (var i = 1; i <= data[j].length; i++) {
+                        if (i % 3 === 0) {
+                            addNames += (data[j][i - 1].FirstName + " " + data[j][i - 1].LastName + "\n");
+                        } else {
+                            var nameLength = (data[j][i - 1].FirstName + " " + data[j][i - 1].LastName).length;
+                            if (nameLength < 10) {
+                                addNames += (data[j][i - 1].FirstName + " " + data[j][i - 1].LastName + "\t\t\t\t\t\t");
+                            } else {
+                                addNames += (data[j][i - 1].FirstName + " " + data[j][i - 1].LastName + "\t\t\t\t");
+                            }
+                        }
+                    }
+                }
+
+                return addNames;
+            };
+
+            //Will enable user details to display once the user search has gone offscreen
+            function enableScroller() {
+
+                $.expr.filters.offscreen = function(el) {
+                    return (
+                        (el.offsetLeft + el.offsetWidth) < 0 ||
+                            (el.offsetTop + el.offsetHeight) < 0 ||
+                            (el.offsetLeft > window.innerWidth || el.offsetTop > window.innerHeight)
+                    );
+                };
+
+                $(window).scroll(function() {
+                    $("#SchoolDetailScroller").slideDown();
+                });
+            }
+
+            //Submits a new max authorized total with selected date
+            $("#submitMaxAuthButton").click(function () {
+                var school = $('#dropdownSchools option:selected').val();
+                var schoolValues = school.split(',');
+                var schoolId = schoolValues[1];
+                var districtId = schoolValues[2];
+                var schoolNbr = schoolValues[0];
+                var date = $('.datepicker').val();
+                var maxEnroll = $('#maxAuthEnrollmentSubmit').val();
+                var userId = $('#userId').val();
+                var forgeryToken = $("input[name='__RequestVerificationToken']").val();
+
+                $.ajax({
+                    type: "POST",
+                    url: "/SchoolProfile/SubmitMaxAuthTotal",
+                    data: {
+                        "school_id": schoolId,
+                        "district_id": districtId,
+                        "school_nbr": schoolNbr,
+                        "ActiveDate": date,
+                        "MaxAuthorized": maxEnroll,
+                        "InactiveDate": null,
+                        "ModifiedDate": date,
+                        "ModifiedBy": userId,
+                        "__RequestVerificationToken": forgeryToken
+                    },
+                    contentType: "application/x-www-form-urlencoded",
+                    datatype: "text",
+
+                    success: function (data) {
+                        $('#successUpdateModalContent').html(data);
+                        $('#profileUpdatedSuccessModal').modal({ show: true });
+                    },
+                    complete: function () {
+                        //Update View Max Authorized History Modal
+                        $.ajax({
+                            type: "GET",
+                            url: "/SchoolProfile/UpdateMaxAuthHistoryModal",
+                            data: {
+                                "school_id": schoolId,
+                                "district_id": districtId,
+                                "school_nbr": schoolNbr
+                            },
+                            datatype: "json",
+                            success: function (maxData) {
+                                var currentMaxAuthData = JSON.parse(maxData["maxAuthorized"]);
+                                var maxHistoryData = JSON.parse(maxData["maxAuthorizedHistory"]);
+
+                                //reset max authorized in Update School Profile
+                                $('#maxAuthEnrollmentSubmit').val(null);
+                                $('#maxAuthEnrollmentSubmit').html("");
+                                $('.datepicker').val(null);
+                                $('.datepicker').html("");
+
+                                //Load max auth history modal
+                                if (maxHistoryData != null && maxData["updatedBy"] != null) {
+                                    var activeDates = '';
+                                    var maxTotals = '';
+                                    var maxUpdatedBy = '';
+
+                                    for (var i = 0; i < maxHistoryData.length; i++) {
+                                        var activeDateString = moment(maxHistoryData[i].ActiveDate, "YYYY-MM-DD").format("MM-DD-YYYY");
+                                        activeDates += activeDateString + "<br />";
+
+                                        maxTotals += maxHistoryData[i].MaxAuthorized + "<br />";
+                                    }
+
+                                    $('#maxAuthActiveDates').html(activeDates);
+                                    $('#maxAuthTotals').html(maxTotals);
+
+                                    for (var i = 0; i < maxData["updatedBy"].length; i++) {
+                                        maxUpdatedBy += maxData["updatedBy"][i] + "<br />";
+                                    }
+                                    $('#maxAuthUpdatedBy').html(maxUpdatedBy);
+                                }
+                                else {
+                                    $('#maxAuthActiveDates').html("No data saved.");
+                                }
+                            },
+                            error: function () {
+                                Console.log("Error - could not update the Max Authorized History modal.");
+                            }
+                        });
+
+                        //refresh max authorized in Profile Details
+                        $.ajax({
+                            type: "GET",
+                            url: "/SchoolProfile/GetCurrentMax",
+                            data: {
+                                "school_id": schoolId,
+                                "district_id": districtId,
+                                "school_nbr": schoolNbr
+                            },
+                            datatype: "json",
+                            success: function (max) {
+                                $('#maxAuthEnrollment').val(max);
+                                $('#maxAuthEnrollment').html(max);
+                            },
+                            error: function () {
+                                Console.log("Error - could not update the Max Authorized in the Profile Details section.");
+                            }
+                        });
+                    },
+                    error: function () {
+                        $('#profileDidNotUpdateModal').modal({ show: true });
+                    }
+                }); //end AJAX
+            });
+
+            //Updates the mission statement and the education program
+            $("#submitProfileButton").click(function () {
+                var school = $('#dropdownSchools option:selected').val();
+                var schoolValues = school.split(',');
+                var schoolId = schoolValues[1];
+                var districtId = schoolValues[2];
+                var schoolNbr = schoolValues[0];
+                var missionStatement = $('#missionStatementUpdate').val();
+                var educationPrgm = $('#educationProgramUpdate').val();
+                var forgeryToken = $("input[name='__RequestVerificationToken']").val();
+
+                $.ajax({
+                    type: "POST",
+                    url: "/SchoolProfile/UpdateSchoolProfile",
+                    data: {
+                        "school_id": schoolId,
+                        "district_id": districtId,
+                        "school_nbr": schoolNbr,
+                        "MissionStatement": missionStatement,
+                        "EducationProgram": educationPrgm,
+                        "__RequestVerificationToken": forgeryToken
+                    },
+                    contentType: "application/x-www-form-urlencoded",
+                    datatype: "text",
+
+                    success: function (data) {
+                        $('#successUpdateModalContent').html(data);
+                        $('#profileUpdatedSuccessModal').modal({ show: true });
+
+                        $.ajax({
+                            type: "GET",
+                            url: "/SchoolProfile/GetSchoolProfileUpdate",
+                            data: {
+                                "school_id": schoolId,
+                                "district_id": districtId,
+                                "school_nbr": schoolNbr
+                            },
+                            datatype: "json",
+                            success: function (schoolProfile) {
+                                $('#missionStatement').html(schoolProfile.MissionStatement);
+                                $('#missionStatement').val(schoolProfile.MissionStatement);
+                                $('#educationProgram').html(schoolProfile.EducationProgram);
+                                $('#educationProgram').val(schoolProfile.EducationProgram);
+                            },
+                            error: function () {
+                                Console.log("Error - Could not update mission statement and education program after submit.");
+                            }
+                        });
+                    },
+                    error: function () {
+                        $('#profileDidNotUpdateModal').modal({ show: true });
+                    }
+                }); //end AJAX
+            });
+
+            $('#goToProjections').click(function () {
+                //Redirects to Projections and loads current school data
+                var school = $('#dropdownSchools option:selected').val();
+                var schoolValues = school.split(',');
+                var school_id = schoolValues[1];
+                var district_id = schoolValues[2];
+                var school_nbr = schoolValues[0];
+
+                var district_nbr = $('#DistrictNbr').val();
+
+                $.post("./SchoolProfile/SchoolToLoadInProjections", { school_id: school_id, district_id: district_id, school_nbr: school_nbr, district_nbr: district_nbr }, function (data, status) { });
+                window.location.href = "../Projections/Index";
+            });
+
+            $('#cactusDataPanel').click(function () {
+                $('#cactusDataBody').toggle();
+                if ($(this).hasClass('glyphicon glyphicon-chevron-down')) {
+                    $(this).removeClass('glyphicon glyphicon-chevron-down');
+                    $(this).addClass('glyphicon glyphicon-chevron-up');
+                } else {
+                    $(this).removeClass('glyphicon glyphicon-chevron-up');
+                    $(this).addClass('glyphicon glyphicon-chevron-down');
+                }
+            });
+
+            $('.loader').fadeOut();
+        });
+    </script>
+}
+
+
+
+<div id="SchoolDetailScroller" class="">
+    <div class="col-md-1">&nbsp;</div>
+    @if (User.IsInRole("USOEAdmin") || User.IsInRole("SCSBStaff"))
+    {
+        <div class="col-md-11">
+            <strong>Editing School: </strong><span id="SchoolNameScroller"></span><span class="pull-right"><a href="../SchoolProfile/Index"><span class="glyphicon glyphicon-repeat"></span> Reset School Profile Manager (no save)</a><br /></span>
+        </div>
+    }
+    else
+    {
+        <div class="col-md-11">
+            <strong>School: </strong><span id="SchoolNameScroller"></span>
+        </div>
+    }
+</div>
+
+
+
+<!--Main School Profile-->
+<h2>School Profile Manager</h2>
+
+<div class="container col-xs-12 col-sm-12 col-md-12 col-lg-12 col-xl-12">
+    <div class="loader"></div>
+    <!--main body container-->
+    <div class="container col-xs-12 col-sm-12 col-md-12 col-lg-12 col-xl-12">
+        <div class="row">
+            <div class="container col-xs-9 col-sm-9 col-md-9 col-lg-9 col-xl-9">
+                <div class="well well-sm col-xs-12 col-sm-12 col-md-12 col-lg-12" style="margin-bottom: 5px;">View and manage the profile of the school.</div>
+            </div>
+        </div>
+
+        <!--School Search-->
+        <div class="container col-xs-9 col-sm-9 col-md-9 col-lg-9 col-xl-9">
+            <div class="row">
+                <div class="panel" style="margin-top: 30px;">
+                    <div class="panel-body ">
+                        <div class="col-xs-4 col-sm-4 col-md-4 col-lg-4 col-xl-4" style="font-size: 22px; color: #3D3D3D;">
+                            <span class="glyphicon glyphicon-search"></span> School Search
+                        </div>
+                        <div class="form-group">
+                            <div class="col-md-7" pull-right>
+                                @Html.DropDownList("dropdownDistricts", null, "--Select District--", new { @class = "form-control" })
+                                <select id="dropdownSchools" class="form-control" name="dropdownSchools">
+                                    <option value="">--Select School--</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!--Cactus Information section-->
+            <div class="row" id="cactusSection">
+                <div class="panel panel-default">
+                    <div class="panel-heading">
+                        <h4><span class="glyphicon glyphicon-apple"></span> CACTUS Information</h4>
+                    </div>
+                    <div class="panel-body">
+                        <div class="container col-xs-12 col-sm-12 col-md-12 col-lg-12 col-xl-12">
+                            <!--Cactus body-->
+                            <input type="hidden" name="usersSchoolID" id="usersSchoolID" />
+                            <input type="hidden" name="usersSchoolNBR" id="usersSchoolNBR" />
+                            <input type="hidden" name="DistrictNbr" id="DistrictNbr" />
+                            <input type="hidden" name="district_id" id="district_id" />
+                            <input type="hidden" name="userId" id="userId" />
+                            <input type="hidden" name="authorizedEnrollment" id="authorizedEnrollment" />
+                            <button type="button" class="btn btn-dafault pull-right"
+                                    data-container="body" data-toggle="popover" data-placement="bottom" data-trigger="focus" title="CACTUS Help" data-content="<strong>CACTUS Information</strong><br/>If you have any questions or discrepancies, please contact the Utah State Office of Education Licensing office at (801) 538-7740." style="display: inline-block;">
+                                <span class="glyphicon glyphicon-question-sign"></span>
+                            </button>
+                            <div class="row">
+                                <div class="col-xs-11 col-sm-11 col-md-11 col-lg-11 col-xl-11">
+                                    <label name="SchoolName" id="SchoolName" style="font-size: 20px; font-weight: bold;">School Name</label>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-xs-11 col-sm-11 col-md-11 col-lg-11 col-xl-11">
+                                    <label name="SchoolLea" id="SchoolLea" style="font-size: 16px; font-weight: lighter;">School LEA</label>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-xs-2 col-sm-2 col-md-2 col-lg-2 col-xl-2">@Html.Label("schoolAddress1", "Address:", new { @class = "boldLabel" })</div>
+                                <div class="col-xs-3 col-sm-3 col-md-3 col-lg-3 col-xl-3"><label class="lighterText" id="schoolAddress1"></label></div>
+                                <div class="col-xs-2 col-sm-2 col-md-2 col-lg-2 col-xl-2">@Html.Label("schoolPhone", "Phone:", new { @class = "boldLabel" })</div>
+                                <div class="col-xs-2 col-sm-2 col-md-2 col-lg-2 col-xl-2"><label class="lighterText" id="schoolPhone"></label></div>
+                            </div>
+                            <div class="row">
+                                <div class="col-xs-2 col-sm-2 col-md-2 col-lg-2 col-xl-2"></div>
+                                <div class="col-xs-3 col-sm-3 col-md-3 col-lg-3 col-xl-3"><label class="lighterText" id="schoolAddress2"></label></div>
+                            </div>
+                            <div class="row">
+                                <div class="col-xs-2 col-sm-2 col-md-2 col-lg-2 col-xl-2">@Html.Label("SchoolID", "School ID: ", new { @class = "boldLabel" })</div>
+                                <div class="col-xs-3 col-sm-3 col-md-3 col-lg-3 col-xl-3" colspan="2"><label class="lighterText" id="SchoolID"></label></div>
+                                <div class="col-xs-2 col-sm-2 col-md-2 col-lg-2 col-xl-2">@Html.Label("schoolGradesAuth", "Grade Authorized: ", new { @class = "boldLabel" })</div>
+                                <div class="col-xs-4 col-sm-4 col-md-4 col-lg-4 col-xl-4"><label class="lighterText" name="schoolGradesAuth" id="schoolGradesAuth"></label></div>
+                            </div>
+                            <div class="row">
+                                <div class="col-xs-2 col-sm-2 col-md-2 col-lg-2 col-xl-2">@Html.Label("DistrictID", "District ID: ", new { @class = "boldLabel" })</div>
+                                <div class="col-xs-3 col-sm-3 col-md-3 col-lg-3 col-xl-3"><label class="lighterText" id="DistrictID"></label></div>
+                                <div class="col-xs-2 col-sm-2 col-md-2 col-lg-2 col-xl-2">@Html.Label("schoolsDistrict", "District Of Residence: ", new { @class = "boldLabel" })</div>
+                                <div class="col-xs-4 col-sm-4 col-md-4 col-lg-4 col-xl-4"><label class="lighterText" id="schoolsDistrict"></label></div>
+                            </div>
+                            <div class="row">
+                                <div class="col-xs-2 col-sm-2 col-md-2 col-lg-2 col-xl-2"><label class="boldLabel">Website: </label></div>
+                                <div class="col-xs-3 col-sm-3 col-md-3 col-lg-3 col-xl-3">
+                                    <label for="schoolsWebsite" class="lighterText" id="schoolsWebsite" name="schoolsWebsite"></label>
+                                </div>
+                                <div class="col-xs-2 col-sm-2 col-md-2 col-lg-2 col-xl-2">@Html.Label("schoolCharteredBy", "Chartered By: ", new { @class = "boldLabel" })</div>
+                                <div class="col-xs-4 col-sm-4 col-md-4 col-lg-4 col-xl-4"><label class="lighterText" id="schoolCharteredBy"></label></div>
+                            </div>
+                            <div class="row">
+                                <div class="col-xs-2 col-sm-2 col-md-2 col-lg-2 col-xl-2">@Html.Label("schoolDateOpen", "Date Opened: ", new { @class = "boldLabel" })</div>
+                                <div class="col-xs-3 col-sm-3 col-md-3 col-lg-3 col-xl-3"><label class="lighterText" id="schoolDateOpen"></label></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!--School Details-->
+            <div class="row" id="schoolDetailsSection">
+                <div class="panel panel-default">
+                    <div class="panel-heading">
+                        <h4><span class="glyphicon glyphicon-stats"></span> School Details</h4>
+                    </div>
+                    <div class="panel-body">
+                        <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12 col-xl-12">
+                            <!--School Details body-->
+                            <div class="row">
+                                <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12 col-xl-12">
+                                    <button type="button" class="btn btn-dafault pull-right"
+                                            data-container="body" data-toggle="popover" data-placement="bottom" data-trigger="focus" title="School Details Help" data-content='<strong>School Details</strong><br/>If you have any questions or discrepancies, please contact <a href="mailto:rabecca.cisneros@schools.utah.gov?Subject=UCAP" target="_top">Rabecca Cisneros</a>, Education Specialist, at the State Charter School Board Office.' style="display: inline-block;">
+                                        <span class="glyphicon glyphicon-question-sign"></span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="container-fluid">
+                                <div class="row">
+                                    <div class="col-xs-2 col-sm-2 col-md-2 col-lg-2 col-xl-2">@Html.Label("missionStatement", "Mission Statement:", new { @class = "boldLabel" })</div>
+                                    <div class="col-xs-9 col-sm-9 col-md-9 col-lg-9 col-xl-9"><label class="lighterText" id="missionStatement"></label></div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-xs-2 col-sm-2 col-md-2 col-lg-2 col-xl-2">@Html.Label("educationProgram", "Education Program:", new { @class = "boldLabel" })</div>
+                                    <div class="col-xs-9 col-sm-9 col-md-9 col-lg-9 col-xl-9"><label class="lighterText" id="educationProgram"></label></div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-xs-2 col-sm-2 col-md-2 col-lg-2 col-xl-2">@Html.Label("documentsUploadedAmt", "Number Of Documents Uploaded: ", new { @class = "boldLabel" })</div>
+                                    <div class="col-xs-3 col-sm-3 col-md-3 col-lg-3 col-xl-3"><label class="lighterText" id="documentsUploadedAmt"></label></div>
+                                    <div class="col-xs-2 col-sm-2 col-md-2 col-lg-2 col-xl-2">@Html.Label("numberUsers", "Number Of Users: ", new { @class = "boldLabel" })</div>
+                                    <div class="col-xs-2 col-sm-2 col-md-2 col-lg-2 col-xl-2"><label class="lighterText" id="numberUsers"></label></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div> <!--End of School Details-->
+            <!--Enrollment Counts Section-->
+            <div class="row" id="enrollmentSection">
+                <div class="panel panel-default">
+                    <!--Board Members head-->
+                    <div class="panel-heading">
+                        <h4>Student Enrollment Counts</h4>
+                    </div>
+                    <div class="panel-body">
+                        <div class="container col-xs-12 col-sm-12 col-md-12 col-lg-12 col-xl-12">
+                            <input type="hidden" id="currentEnrollment" />
+                            <input type="hidden" id="maxAuthEnrollment" />
+                            <!--Enrollment Counts body-->
+                            <div class="row">
+                                <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12 col-xl-12">
+                                    <button type="button" class="btn btn-dafault pull-right"
+                                            data-container="body" data-toggle="popover" data-placement="bottom" data-trigger="focus" title="Enrollment Counts Help" data-content='<strong>Max Authorized Total</strong><br />The max authorized total for a school based on its assigned active date.<br /><br /><strong>Student Enrollment Counts</strong><br />Enrollment of students at the school given by the most recent October counts.' style="display: inline-block;">
+                                        <span class="glyphicon glyphicon-question-sign"></span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-xs-7 col-sm-7 col-md-7 col-lg-7 col-xl-7" id="getEnrollmentHistogram">
+                                    <img id="enrollmentHistogramImg" alt="Histogram of current Max Authorized Total and Enrollment Count" />
+                                </div>
+                                <div class="col-xs-4 col-sm-4 col-md-4 col-lg-4 col-xl-4" id="getPercentOfMaxCentered">
+                                    <table style="text-align:center; width: 200px;" class="center-block">
+                                        <tbody style="vertical-align:middle;">
+                                            <tr><td><label id="percentOfMax"></label></td></tr>
+                                            <tr>
+                                                <td><label id="percentOfMaxLabel">% of Max</label></td> 
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="col-xs-2 col-sm-2 col-md-2 col-lg-2 col-xl-2">
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-xs-11 col-sm-11 col-md-11 col-lg-11 col-xl-11"><a href="#enrollmentHistoryModal" id="enrollmentHistory" class="pull-right" data-toggle="modal">View Enrollment History</a></div>
+                            </div>
+                            <div class="row">
+                                <div class="col-xs-11 col-sm-11 col-md-11 col-lg-11 col-xl-11"><a href="#maxAuthHistoryModal" id="maxAuthHistory" class="pull-right" data-toggle="modal">View Max Authorized History</a></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div> <!--End of Enrollment Counts Section-->
+            <!--Board Members Section-->
+            <div class="row" id="boardMembersSection">
+                <div class="panel panel-default">
+                    <!--Board Members head-->
+                    <div class="panel-heading">
+                        <h4>Board Members</h4>
+                    </div>
+                    <div class="panel-body">
+                        <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12 col-xl-12">
+                            <!--Board Members body-->
+                            <div class="container">
+                                <div class="row">
+                                    <div class="col-xs-3 col-sm-3 col-md-3 col-lg-3 col-xl-3">@Html.Label("boardMembersAmt", "Number Of Board Members: ", new { @class = "boldLabel" })</div>
+                                    <div class="col-xs-9 col-sm-9 col-md-9 col-lg-9 col-xl-9"><label class="lighterText" id="boardMembersAmt"></label></div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12 col-xl-12"><label class="boldLabel">Board Members</label></div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12 col-xl-12"><label>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Chair </label></div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-xs-1 col-sm-1 col-md-1 col-lg-1 col-xl-1"></div>
+                                    <div class="col-xs-11 col-sm-11 col-md-11 col-lg-11 col-xl-11"><label class="lighterText" id="chairNames" style="white-space: pre-wrap;"></label></div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12 col-xl-12"><label>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Member </label></div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-xs-1 col-sm-1 col-md-1 col-lg-1 col-xl-1"></div>
+                                    <div class="col-xs-11 col-sm-11 col-md-11 col-lg-11 col-xl-11"><label class="lighterText" id="memberNames" style="white-space: pre-wrap;"></label></div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12 col-xl-12"><label>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Director/Principal </label><label id="directorTitle" style="white-space: pre-wrap;"></label></div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-xs-1 col-sm-1 col-md-1 col-lg-1 col-xl-1"></div>
+                                    <div class="col-xs-10 col-sm-10 col-md-10 col-lg-10 col-xl-10"><label class="lighterText" id="directorName" style="white-space: pre-wrap;"></label></div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12 col-xl-12"><label>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Business Managers </label></div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-xs-1 col-sm-1 col-md-1 col-lg-1 col-xl-1"></div>
+                                    <div class="col-xs-11 col-sm-11 col-md-11 col-lg-11 col-xl-11"><label class="lighterText" id="businessManagers" style="white-space: pre-wrap;"></label></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!--Update School Profile-->
+            @if (User.IsInRole("USOEAdmin") || User.IsInRole("SCSBStaff") || ViewBag.UserCanEditSchoolProfile == true)
+            {
+                using (Html.BeginForm("UpdateSchoolProfile", "SchoolProfile", new { @class = "form-horizontal", role = "form", id = "schoolProfileForm", enctype = "multipart/form-data" }))
+                {
+                    @Html.AntiForgeryToken()
+
+                    <div class="row" id="updateSection">
+                        <div class="panel panel-default">
+                            <div class="panel-heading">
+                                <h4><span class="glyphicon glyphicon-floppy-save"></span> Submit/Update School Profile <span class="badge">Admin</span></h4>
+                            </div>
+                            <div class="panel-body">
+                                <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12 col-xl-12">
+                                    @if (User.IsInRole("USOEAdmin") || User.IsInRole("SCSBStaff"))
+                                    {
+                                        <button type="button" class="btn btn-dafault pull-right"
+                                                data-container="body" data-toggle="popover" data-placement="bottom" data-trigger="focus" title="Submit/Update School Profile Help" data-content="<strong>Max Authorized: </strong><br/>Type in the max authorized total that you would like to submit for the school. Then, select the date that you would like this total to be active.<br /><br />Note: An active date can only save one max authorized total for each school.<br /><br /><strong>Mission Statement/Education Program: </strong><br/>Make any adjustments to the Mission Statement and/or the Education Program by typing in the designated area." style="display: inline-block;">
+                                            <span class="glyphicon glyphicon-question-sign"></span>
+                                        </button><br /><br />
+                                    }
+                                    else
+                                    {
+                                        <button type="button" class="btn btn-dafault pull-right"
+                                                data-container="body" data-toggle="popover" data-placement="bottom" data-trigger="focus" title="Submit/Update School Profile Help" data-content="<strong>Mission Statement/Education Program: </strong><br/>Make any adjustments to the Mission Statement and/or the Education Program by typing in the designated area." style="display: inline-block;">
+                                            <span class="glyphicon glyphicon-question-sign"></span>
+                                        </button><br /><br />
+                                    }
+                                    @if (User.IsInRole("USOEAdmin") || User.IsInRole("SCSBStaff"))
+                                    {
+                                        <div class="row">
+                                            <h4>Max Authorized</h4>
+                                        </div>
+                                        <div class="row">
+                                            <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12 col-xl-12">
+                                                <h5>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Submit a new max authorized total and designate the date you would like it to become active.</h5>
+                                            </div>
+                                        </div>
+                                        <div class="row form-group">
+                                            <div class="col-xs-1 col-sm-1 col-md-1 col-lg-1 col-xl-1"></div>
+                                            <div class="col-xs-2 col-sm-2 col-md-2 col-lg-2 col-xl-2">
+                                                @Html.Label("maxAuthEnrollmentSubmit", "Max Authorized: ", new { @class = "boldLabel" })
+                                            </div>
+                                            <div class="col-xs-2 col-sm-2 col-md-2 col-lg-2 col-xl-2">
+                                                @Html.TextBox("maxAuthEnrollmentSubmit", "", new { placeholder = "Type Max", style = "width:100px; text-align:left;", @class = "lighterText form-control" })
+                                            </div>
+                                            <div class="col-xs-5 col-sm-5 col-md-5 col-lg-5 col-xl-5">
+                                                <input type="text" class="datepicker form-control" style="width:150px; text-align:left;" placeholder="Select Active Date" />
+                                            </div>
+
+                                        </div>
+                                        <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12 col-xl-12"><button type="button" id="submitMaxAuthButton" name="submitMaxAuthButton" class="btn btn-primary pull-right" value="Create"><span class="glyphicon glyphicon-floppy-save"></span>&nbsp;Submit</button></div>
+                                        <br />
+                                        <hr />
+                                    }
+                                    <div class="row">
+                                        <h4>Mission Statement/Education Program</h4>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12 col-xl-12">
+                                            <h5>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Update the school's mission statement and/or education program.</h5>
+                                        </div>
+                                    </div>
+                                    <div class="row form-group">
+                                        <div class="col-xs-1 col-sm-1 col-md-1 col-lg-1 col-xl-1"></div>
+                                        <div class="col-xs-2 col-sm-2 col-md-2 col-lg-2 col-xl-2">@Html.Label("missionStatementUpdate", "Mission Statement:   ", new { @class = "boldLabel" })</div>
+                                        <div class="col-xs-9 col-sm-9 col-md-9 col-lg-9 col-xl-9">@Html.TextArea("missionStatementUpdate", "", new { style = "width:80%; height:60px;", @class = "lighterText" })</div>
+                                    </div>
+                                    <div class="row form-group">
+                                        <div class="col-xs-1 col-sm-1 col-md-1 col-lg-1 col-xl-1"></div>
+                                        <div class="col-xs-2 col-sm-2 col-md-2 col-lg-2 col-xl-2">@Html.Label("educationProgramUpdate", "Education Program: ", new { @class = "boldLabel" })</div>
+                                        <div class="col-xs-9 col-sm-9 col-md-9 col-lg-9 col-xl-9">@Html.TextArea("educationProgramUpdate", "", new { style = "width:80%; height:60px;", @class = "lighterText" })</div>
+                                    </div>
+                                    <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12 col-xl-12"><button type="button" id="submitProfileButton" name="submitProfileButton" class="btn btn-primary pull-right" value="Create"><span class="glyphicon glyphicon-floppy-save"></span>&nbsp;Update</button></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                }
+            }
+        </div>
+
+
+
+
+
+        <!--End of main body container-->
+        <!--Sidebars-->
+        <div style="position:fixed; top: 20%; left:73%; width:70%">
+            <div class="col-xs-3 col-sm-3 col-md-3 col-lg-3 col-xl-3">
+                <div class="row">
+                    <div class="panel panel-default">
+                        <div class="panel-heading collapsable">
+                            <h5><span class="glyphicon glyphicon-cog"></span> Actions</h5>
+                        </div>
+                        <div class="panel-body">
+                            @if (User.IsInRole("USOEAdmin") || User.IsInRole("SCSBStaff"))
+                            {
+                                <a href="../SchoolProfile/Index" class="actionBtn refreshPageLink btn btn-default" role="button" style="white-space:normal; padding: 6px 12px 6px 12px;"><span class="glyphicon glyphicon-repeat"></span> Reset Profile (no save)</a>
+                                <br />
+                            }
+                            @if (ViewBag.IsProjectionsClosed != true)
+                            {
+                                <a class="actionBtn btn btn-default" id="goToProjections" style="white-space:normal; padding: 6px 12px 6px 12px;" href="#"><span class="glyphicon glyphicon-arrow-right"></span> Go To Projections</a>
+                            }
+                            @if (User.IsInRole("USOEAdmin") || User.IsInRole("SCSBStaff") || ViewBag.CanManage == true)
+                            {
+                                <a class="actionBtn btn btn-default" style="white-space:normal; padding: 6px 12px 6px 12px;" href="/Account/ManageUsers"><span class="glyphicon glyphicon-arrow-right"></span> Go To User Manager</a>
+                            }
+                            <a href="/" class="actionBtn btn btn-default" role="button" style="color: red; white-space:normal; padding: 6px 12px 6px 12px;">Cancel/Go Home</a>
+                        </div>
+                    </div>
+                </div>
+                <!--End of sidebar-->
+                <!--Quick Scroll Sidebar-->
+                <div class="row">
+                    <div class="panel panel-default">
+                        <div class="panel-heading collapsable">
+                            <h5><span class="glyphicon glyphicon-hourglass"></span> Quick Scroll</h5>
+                        </div>
+                        <div class="panel-body" id="quickScrollBody">
+                            <a href="#cactusSection">Cactus Information</a> <br />
+                            <a href="#schoolDetailsSection">School Details</a> <br />
+                            <a href="#enrollmentSection">Student Enrollment Counts</a> <br />
+                            @*<a href="#demographicSubgroupsSection">Demographic Subgroups</a> <br />*@
+                            <a href="#boardMembersSection">Board Members</a> <br />
+                            @if (User.IsInRole("USOEAdmin") || User.IsInRole("SCSBStaff") || ViewBag.UserCanEditSchoolProfile == true)
+                            {
+                                <a href="#updateSection">Update School Profile</a>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+        <!--End of Quick Scroll sidebar-->
+    </div>
+</div>
+<br /><br /><br /><br /><br /><br /><br /><br /><br /><br /><br /><br /><br />
+
+<!-- Enrollment History Modal -->
+<div class="modal fade" id="enrollmentHistoryModal" tabindex="-1" role="dialog" aria-labelledby="enrollmentHistoryModalLabel">
+    <div class="modal-dialog modal-lg modal-dialog-center" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                <h4 class="modal-title" id="previewModalLabel">Enrollment History</h4>
+            </div>
+            <div class="modal-body">
+                <label name="schoolNameModal" class="schoolNameModal" style="font-size: 20px; font-weight: bold;">School Name</label>
+                <table class="tableLength">
+                    <tr>
+                        <th colspan="2">School Year</th>
+                        <th colspan="1">Total</th>
+                        <th colpsan="1">PK</th>
+                        <th colpsan="1">K</th>
+                        <th colspan="1">1</th>
+                        <th colspan="1">2</th>
+                        <th colspan="1">3</th>
+                        <th colspan="1">4</th>
+                        <th colspan="1">5</th>
+                        <th colspan="1">6</th>
+                        <th colspan="1">7</th>
+                        <th colspan="1">8</th>
+                        <th colspan="1">9</th>
+                        <th colspan="1">10</th>
+                        <th colspan="1">11</th>
+                        <th colspan="1">12</th>
+                    </tr>
+                    <!--Actual Oct. 1 funded enrollment totals-->
+                    <tr>
+                        <td colspan="2" id="actualEnrollmentDates"></td>
+                        <td colspan="1" id="actualFinalTotals"></td>
+                        <td colspan="1" id="actualPKTotals"></td>
+                        <td colspan="1" id="actualKTotals"></td>
+                        <td colspan="1" id="actual1Totals"></td>
+                        <td colspan="1" id="actual2Totals"></td>
+                        <td colspan="1" id="actual3Totals"></td>
+                        <td colspan="1" id="actual4Totals"></td>
+                        <td colspan="1" id="actual5Totals"></td>
+                        <td colspan="1" id="actual6Totals"></td>
+                        <td colspan="1" id="actual7Totals"></td>
+                        <td colspan="1" id="actual8Totals"></td>
+                        <td colspan="1" id="actual9Totals"></td>
+                        <td colspan="1" id="actual10Totals"></td>
+                        <td colspan="1" id="actual11Totals"></td>
+                        <td colspan="1" id="actual12Totals"></td>
+                    </tr>
+                </table>
+                <br />
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-default returnButton" data-dismiss="modal" role="button"><span class="glyphicon glyphicon-arrow-left"></span>&nbsp;Return to School Profile</button>
+            </div>
+        </div>
+    </div>
+</div><!--end Enrollment History Modal-->
+<!-- Max Authorized Enrollment Modal -->
+<div class="modal fade" id="maxAuthHistoryModal" tabindex="-1" role="dialog" aria-labelledby="maxAuthHistoryModal">
+    <div class="modal-dialog modal-dialog-center" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                <h4 class="modal-title" id="maxAuthHistoryModalLabel">Max Authorized History</h4>
+            </div>
+            <div class="modal-body">
+                <label name="schoolNameModal" class="schoolNameModal" style="font-size: 20px; font-weight: bold;">School Name</label>
+                <div>
+                    <table class="tableLength">
+                        <tr>
+                            <th colspan="2">Active Date</th>
+                            <th colspan="2">Max Authorized</th>
+                            <th colspan="3">Updated By</th>
+                        </tr>
+                        <tr>
+                            <td colspan="2" id="maxAuthActiveDates"></td>
+                            <td colspan="2" id="maxAuthTotals"></td>
+                            <td colspan="3" id="maxAuthUpdatedBy"></td>
+                        </tr>
+                    </table>
+                </div>
+                <br />
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-default" id="returnButton" data-dismiss="modal" role="button"><span class="glyphicon glyphicon-arrow-left"></span>&nbsp;Return to School Profile</button>
+            </div>
+        </div>
+    </div>
+</div><!--end Max Authorized Enrollment Modal-->
+<!--Submit/Update School Profile Successfully Message Modal -->
+<div class="modal fade" id="profileUpdatedSuccessModal" tabindex="-1" style="z-index:9998;" role="dialog" aria-labelledby="profileUpdatedSuccessModalLabel">
+    <div class="modal-dialog modal-dialog-center" role="document">
+        <div class="modal-content">
+            <div class="modal-header panel-success">
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                <h4 class="modal-title" id="profileUpdatedSuccessModalLabel"><span class="glyphicon glyphicon-floppy-saved"></span> The School Profile was successfully updated!</h4>
+            </div>
+            <div class="modal-body">
+                <div id='successUpdateModalContent'></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-default" id="finalizeSchoolProjectionButton" data-dismiss="modal" role="button"><span class="glyphicon glyphicon-arrow-left"></span>&nbsp;Return to School Profile</button>
+            </div>
+        </div>
+    </div>
+</div><!--Updated School Profile Successfully Message Modal-->
+<!-- Update School Profile NOT Successful Message Modal -->
+<div class="modal fade" id="profileDidNotUpdateModal" tabindex="-1" style="z-index:9998;" role="dialog" aria-labelledby="profileDidNotUpdateModalLabel">
+    <div class="modal-dialog modal-dialog-center" role="document">
+        <div class="modal-content">
+            <div class="modal-header panel-danger">
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                <h4 class="modal-title" id="profileDidNotUpdateModalLabel"><span class="glyphicon glyphicon-floppy-remove"></span> The School Profile Was Not Updated</h4>
+            </div>
+            <div class="modal-body">
+                <div>Unable to create/update database at this time. Please try again or contact support.</div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-default" id="finalizeSchoolProjectionButton" data-dismiss="modal" role="button"><span class="glyphicon glyphicon-arrow-left"></span>&nbsp;Return to School Profile</button>
+            </div>
+        </div>
+    </div>
+</div><!--Updated School Profile NOT Successful Message Modal-->
